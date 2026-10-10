@@ -31,8 +31,10 @@ jobs:
       - name: Report which settings GitHub can see
         run: |
           for name in EXPO_TOKEN SUPABASE_URL SUPABASE_ANON_KEY; do
-            if [ -n "${!name}" ]; then echo "::notice::$name is set"; else echo "::warning::$name is missing"; fi
+            if [ -n "${!name}" ]; then echo "::notice::$name is set"; else echo "::error::$name is missing. Add it under Settings → Secrets and variables → Actions."; missing=1; fi
           done
+          # Fail loudly so a run without settings never shows a misleading green check.
+          [ -z "$missing" ]
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
