@@ -1,0 +1,55 @@
+name: Test build
+
+# Every push to main is checked, then sent to Expo to build an Android test app (APK).
+# The install link appears on expo.dev under Projects > theprayerapp > Builds.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: test-build
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Check the code
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Web bundle builds
+        run: npx expo export --platform web --output-dir dist
+
+  android-test-build:
+    name: Android test build
+    needs: check
+    runs-on: ubuntu-latest
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+    steps:
+      - name: Stop if Expo is not connected yet
+        if: env.EXPO_TOKEN == ''
+        run: |
+          echo "::warning::Add an EXPO_TOKEN repository secret to turn on Android test builds."
+      - uses: actions/checkout@v4
+        if: env.EXPO_TOKEN != ''
+      - uses: actions/setup-node@v4
+        if: env.EXPO_TOKEN != ''
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        if: env.EXPO_TOKEN != ''
+      - name: Link this repo to the Expo project
+        if: env.EXPO_TOKEN != ''
+        run: npx eas-cli@latest init --non-interactive --force
+      - name: Start Android build
+        if: env.EXPO_TOKEN != ''
+        run: npx eas-cli@latest build --profile preview --platform android --non-interactive --no-wait
