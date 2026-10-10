@@ -1,27 +1,32 @@
 # The Prayer App
 
-A daily prayer app with no login. It opens on today's prayer, and listeners can play any of the seven daily prayers at any time. Audio keeps playing when the phone is on silent or locked.
+A daily prayer app with no login. It opens on today's prayer, and listeners can play any prayer posted so far this week. Audio keeps playing when the phone is on silent or locked, and this week's prayers are saved on the phone for offline listening.
 
-## Changing the prayers
+## Posting prayers
 
-1. Replace the audio file for a day in `assets/audio/` (`sunday.mp3` … `saturday.mp3`). Keep the same file name.
-2. Edit the title, theme and description for that day in `src/content/prayers.ts`.
-3. Push to `main`. A new test build starts automatically.
+Prayers are posted one day at a time from the private upload page (`admin/`), stored in Supabase, and downloaded by the app. See **SETUP.md** for the one-time connection steps.
 
-The audio in this repo is placeholder tone, not real prayers.
+Until the prayer service is connected, the app runs in demo mode with the sample audio in `assets/audio/`.
+
+| Folder | What it is |
+| --- | --- |
+| `App.tsx`, `src/` | Listener app (iPhone and Android) |
+| `admin/` | Upload page (web only), published to EAS Hosting |
+| `supabase/schema.sql` | Database tables, security rules and audio storage |
 
 ## Pipeline
 
 | Step | What happens |
 | --- | --- |
-| Push to `main` | GitHub Actions typechecks the app and builds the web bundle |
+| Push to `main` | GitHub Actions typechecks the listener app and the upload page |
+| Upload page | Published to https://prayer-uploads-charleseluma.expo.app once Supabase is connected |
 | Android test build | If the `EXPO_TOKEN` secret is set, Expo builds an installable APK. The install link is on expo.dev under the project's Builds page |
 | iPhone test build | Added once the Apple Developer account exists (TestFlight) |
 | Store release | Production builds, run only when the app is approved by the tester |
 
 ### One-time setup
 
-- `EXPO_TOKEN`: create at expo.dev → Account settings → Access tokens, then add it in GitHub → Settings → Secrets and variables → Actions → New repository secret.
+See SETUP.md. GitHub needs the `EXPO_TOKEN` secret and the `SUPABASE_URL` and `SUPABASE_ANON_KEY` variables.
 
 ## For developers
 

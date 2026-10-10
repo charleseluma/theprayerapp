@@ -1,7 +1,14 @@
 name: Test build
 
-# Every push to main is checked, then sent to Expo to build an Android test app (APK).
-# The install link appears on expo.dev under Projects > theprayerapp > Builds.
+# Every push to main:
+#   1. checks both the listener app and the upload page,
+#   2. starts an Android test build of the listener app (install link on expo.dev → Builds),
+#   3. publishes the upload page to https://prayer-uploads-charleseluma.expo.app
+#
+# Settings (GitHub → Settings → Secrets and variables → Actions):
+#   Secret   EXPO_TOKEN         – from expo.dev → Account settings → Access tokens
+#   Variable SUPABASE_URL       – Supabase → Project Settings → API → Project URL
+#   Variable SUPABASE_ANON_KEY  – Supabase → Project Settings → API → anon public key
 on:
   push:
     branches: [main]
@@ -10,6 +17,11 @@ on:
 concurrency:
   group: test-build
   cancel-in-progress: true
+
+env:
+  EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+  SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+  SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
 
 jobs:
   check:
@@ -21,35 +33,94 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
-      - name: Typecheck
+          cache-dependency-path: |
+            package-lock.json
+            admin/package-lock.json
+      - name: Listener app — install
+        run: npm ci
+      - name: Listener app — typecheck
         run: npx tsc --noEmit
-      - name: Web bundle builds
+      - name: Listener app — web bundle builds
         run: npx expo export --platform web --output-dir dist
+      - name: Upload page — install
+        working-directory: admin
+        run: npm ci
+      - name: Upload page — typecheck
+        working-directory: admin
+        run: npx tsc --noEmit
 
   android-test-build:
     name: Android test build
     needs: check
     runs-on: ubuntu-latest
-    env:
-      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
     steps:
-      - name: Stop if Expo is not connected yet
-        if: env.EXPO_TOKEN == ''
+      - name: Check settings
+        id: ready
         run: |
-          echo "::warning::Add an EXPO_TOKEN repository secret to turn on Android test builds."
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "::warning::Add the EXPO_TOKEN secret to turn on Android test builds."
+            echo "go=false" >> "$GITHUB_OUTPUT"
+          else
+            [ -z "$SUPABASE_URL" ] && echo "::notice::SUPABASE_URL is not set, so this build uses demo prayers."
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/checkout@v4
-        if: env.EXPO_TOKEN != ''
+        if: steps.ready.outputs.go == 'true'
       - uses: actions/setup-node@v4
-        if: env.EXPO_TOKEN != ''
+        if: steps.ready.outputs.go == 'true'
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
-        if: env.EXPO_TOKEN != ''
+      - if: steps.ready.outputs.go == 'true'
+        run: npm ci
+      - name: Point the app at the prayer service
+        if: steps.ready.outputs.go == 'true'
+        run: |
+          printf 'EXPO_PUBLIC_SUPABASE_URL=%s\nEXPO_PUBLIC_SUPABASE_ANON_KEY=%s\n' "$SUPABASE_URL" "$SUPABASE_ANON_KEY" > .env
       - name: Link this repo to the Expo project
-        if: env.EXPO_TOKEN != ''
+        if: steps.ready.outputs.go == 'true'
         run: npx eas-cli@latest init --non-interactive --force
       - name: Start Android build
-        if: env.EXPO_TOKEN != ''
+        if: steps.ready.outputs.go == 'true'
         run: npx eas-cli@latest build --profile preview --platform android --non-interactive --no-wait
+
+  deploy-upload-page:
+    name: Publish upload page
+    needs: check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: admin
+    steps:
+      - name: Check settings
+        id: ready
+        working-directory: .
+        run: |
+          if [ -z "$EXPO_TOKEN" ] || [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_ANON_KEY" ]; then
+            echo "::warning::Add EXPO_TOKEN, SUPABASE_URL and SUPABASE_ANON_KEY to publish the upload page."
+            echo "go=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.ready.outputs.go == 'true'
+      - uses: actions/setup-node@v4
+        if: steps.ready.outputs.go == 'true'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: admin/package-lock.json
+      - if: steps.ready.outputs.go == 'true'
+        run: npm ci
+      - name: Build the page
+        if: steps.ready.outputs.go == 'true'
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+        run: npx expo export --platform web --output-dir dist
+      - name: Link to the Expo project
+        if: steps.ready.outputs.go == 'true'
+        run: npx eas-cli@latest init --non-interactive --force
+      - name: Publish
+        if: steps.ready.outputs.go == 'true'
+        run: npx eas-cli@latest deploy --prod --non-interactive --dev-domain prayer-uploads-charleseluma

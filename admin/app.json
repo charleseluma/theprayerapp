@@ -1,0 +1,15 @@
+{
+  "expo": {
+    "name": "Prayer Uploads",
+    "slug": "theprayerapp-admin",
+    "version": "1.0.0",
+    "platforms": ["web"],
+    "userInterfaceStyle": "automatic",
+    "web": {
+      "output": "single",
+      "name": "Prayer Uploads",
+      "favicon": "../assets/favicon.png",
+      "themeColor": "#A8742F"
+    }
+  }
+}
