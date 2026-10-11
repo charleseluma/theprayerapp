@@ -1,6 +1,6 @@
 # The Prayer App
 
-A daily prayer app with no login. It opens on today's prayer, and listeners can play any prayer posted so far this week. Audio keeps playing when the phone is on silent or locked, and this week's prayers are saved on the phone for offline listening.
+A daily prayer app with no login. It opens on today's prayer, and listeners can play any prayer posted this week or last week. Audio keeps playing when the phone is on silent or locked, and both weeks' prayers are saved on the phone for offline listening. Older prayers are kept for a future paid archive.
 
 ## Posting prayers
 
