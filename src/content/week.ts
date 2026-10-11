@@ -29,17 +29,17 @@ export function localISODate(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
-/** The seven dates of the week containing `now`, Sunday first. */
-export function weekDates(now: Date): string[] {
-  const sunday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay());
+/** The seven dates of the week containing `now`, Sunday first. `offset` -1 gives last week. */
+export function weekDates(now: Date, offset = 0): string[] {
+  const sunday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay() + offset * 7);
   return Array.from({ length: 7 }, (_, i) =>
     localISODate(new Date(sunday.getFullYear(), sunday.getMonth(), sunday.getDate() + i)),
   );
 }
 
-export function buildWeek(now: Date, prayersByDate: Map<string, Prayer>): WeekDay[] {
+export function buildWeek(now: Date, prayersByDate: Map<string, Prayer>, offset = 0): WeekDay[] {
   const today = localISODate(now);
-  return weekDates(now).map((date, index) => ({
+  return weekDates(now, offset).map((date, index) => ({
     date,
     index,
     day: DAY_NAMES[index],

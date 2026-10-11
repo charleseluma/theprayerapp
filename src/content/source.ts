@@ -6,7 +6,8 @@ import { DEMO_PRAYERS } from './demo';
 import { buildWeek, weekDates, type Prayer, type WeekDay } from './week';
 
 export type WeekResult = {
-  days: WeekDay[];
+  days: WeekDay[]; // this week
+  lastWeek: WeekDay[]; // the week before
   source: 'online' | 'saved' | 'demo';
 };
 
@@ -100,20 +101,22 @@ function toPrayer(row: PrayerRow): Prayer {
   return { title: row.title, theme: row.theme, description: row.description, audio: { uri } };
 }
 
-function rowsToWeek(now: Date, rows: PrayerRow[]): WeekDay[] {
-  return buildWeek(now, new Map(rows.map((r) => [r.prayer_date, toPrayer(r)])));
+function rowsToWeeks(now: Date, rows: PrayerRow[]): Pick<WeekResult, 'days' | 'lastWeek'> {
+  const byDate = new Map(rows.map((r) => [r.prayer_date, toPrayer(r)]));
+  return { days: buildWeek(now, byDate), lastWeek: buildWeek(now, byDate, -1) };
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 async function fetchRows(now: Date): Promise<PrayerRow[]> {
-  const dates = weekDates(now);
+  const first = weekDates(now, -1)[0]; // last week's Sunday
+  const last = weekDates(now)[6]; // this week's Saturday
   const params = new URLSearchParams({
     select: 'prayer_date,title,theme,description,audio_path',
     order: 'prayer_date.asc',
   });
-  params.append('prayer_date', `gte.${dates[0]}`);
-  params.append('prayer_date', `lte.${dates[6]}`);
+  params.append('prayer_date', `gte.${first}`);
+  params.append('prayer_date', `lte.${last}`);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -134,18 +137,21 @@ async function fetchRows(now: Date): Promise<PrayerRow[]> {
 
 export async function loadWeek(now = new Date()): Promise<WeekResult> {
   if (!isConfigured) {
-    const demo = new Map<string, Prayer>(weekDates(now).map((date, i) => [date, DEMO_PRAYERS[i]]));
-    return { days: buildWeek(now, demo), source: 'demo' };
+    const demo = new Map<string, Prayer>([
+      ...weekDates(now, -1).map((date, i) => [date, DEMO_PRAYERS[i]] as const),
+      ...weekDates(now).map((date, i) => [date, DEMO_PRAYERS[i]] as const),
+    ]);
+    return { days: buildWeek(now, demo), lastWeek: buildWeek(now, demo, -1), source: 'demo' };
   }
 
   try {
     const rows = await fetchRows(now);
     saveRows(rows);
     syncAudio(rows); // runs in the background
-    return { days: rowsToWeek(now, rows), source: 'online' };
+    return { ...rowsToWeeks(now, rows), source: 'online' };
   } catch (error) {
     const saved = await readSavedRows();
     if (saved.length === 0) throw error;
-    return { days: rowsToWeek(now, saved), source: 'saved' };
+    return { ...rowsToWeeks(now, saved), source: 'saved' };
   }
 }

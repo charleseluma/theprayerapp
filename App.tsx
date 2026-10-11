@@ -32,6 +32,11 @@ function formatTime(seconds: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
+function shortDate(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
 function formatToday(date: Date): string {
   return date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
 }
@@ -56,17 +61,22 @@ function PrayerScreen() {
   const { state, refreshing, refresh } = usePrayerWeek();
 
   const days = state.status === 'ready' ? state.days : [];
+  const lastWeek = state.status === 'ready' ? state.lastWeek.filter((d) => d.prayer) : [];
+  const allDays = [...lastWeek, ...days];
+  const lastWeekDates = new Set(lastWeek.map((d) => d.date));
   const today = days.find((d) => d.isToday);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
   // Start on today's prayer, and jump back to today when a new day or week begins.
   const loadedOn = state.status === 'ready' ? state.loadedOn : null;
   useEffect(() => {
-    if (loadedOn) setSelectedDate((cur) => (cur && days.some((d) => d.date === cur) ? cur : loadedOn));
+    if (loadedOn) setSelectedDate((cur) => (cur && allDays.some((d) => d.date === cur) ? cur : loadedOn));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadedOn]);
 
-  const selected = days.find((d) => d.date === selectedDate) ?? today;
+  const selected = allDays.find((d) => d.date === selectedDate) ?? today;
+  const dayLabel = (d: WeekDay) =>
+    d.isToday ? 'Today’s prayer' : lastWeekDates.has(d.date) ? `Last ${d.day}’s prayer` : `${d.day}’s prayer`;
   const prayer = selected?.prayer ?? null;
 
   const player = useAudioPlayer(null, { updateInterval: 250 });
@@ -152,6 +162,52 @@ function PrayerScreen() {
     player.seekTo(target).catch(() => {});
   };
 
+  const renderRow = (d: WeekDay, i: number, count: number, past: boolean) => {
+    const isSelected = d.date === selected?.date;
+    const isPlaying = isSelected && status.playing;
+    const available = Boolean(d.prayer);
+    const theme = d.prayer?.theme || d.day;
+    const sub = past
+      ? `${shortDate(d.date)} · ${theme}`
+      : d.prayer
+        ? `${d.isToday ? 'Today · ' : ''}${theme}`
+        : d.isFuture
+          ? `Arrives ${d.day}`
+          : d.isToday
+            ? 'Today · Coming soon'
+            : 'Not posted';
+    return (
+      <Pressable
+        key={d.date}
+        onPress={() => selectDay(d)}
+        disabled={!available}
+        accessibilityRole="button"
+        accessibilityState={{ disabled: !available, selected: isSelected }}
+        accessibilityLabel={`${past ? 'Last ' : ''}${d.day}: ${d.prayer ? d.prayer.title : sub}${isPlaying ? ', playing' : ''}`}
+        style={({ pressed }) => [s.row, i < count - 1 && s.rowDivider, pressed && s.rowPressed]}
+      >
+        <View style={[s.dayBadge, isSelected && s.dayBadgeActive]}>
+          <Text style={[s.dayBadgeText, isSelected && s.dayBadgeTextActive]}>{d.short}</Text>
+        </View>
+        <View style={s.rowText}>
+          <Text style={[s.rowTitle, !available && s.rowTitleMuted]} numberOfLines={1}>
+            {d.prayer ? d.prayer.title : d.day}
+          </Text>
+          <Text style={s.rowSub}>{sub}</Text>
+        </View>
+        {available && (
+          <View style={[s.rowPlay, isSelected && s.rowPlayActive]}>
+            {isPlaying ? (
+              <PauseIcon color={t.onAccent} small />
+            ) : (
+              <PlayIcon color={isSelected ? t.onAccent : t.accent} small />
+            )}
+          </View>
+        )}
+      </Pressable>
+    );
+  };
+
   const [trackWidth, setTrackWidth] = useState(0);
   const progress = status.duration > 0 ? Math.min(status.currentTime / status.duration, 1) : 0;
   const ready = Boolean(prayer) && status.isLoaded;
@@ -195,7 +251,7 @@ function PrayerScreen() {
 
           {state.status === 'ready' && selected && !prayer && (
             <View>
-              <Text style={s.eyebrow}>{selected.isToday ? 'Today’s prayer' : `${selected.day}’s prayer`}</Text>
+              <Text style={s.eyebrow}>{dayLabel(selected)}</Text>
               <Text style={s.prayerTitle}>
                 {selected.isToday ? 'Today’s prayer is on its way' : `Not posted for ${selected.day}`}
               </Text>
@@ -210,7 +266,7 @@ function PrayerScreen() {
           {state.status === 'ready' && selected && prayer && (
             <>
               <View style={s.cardTop}>
-                <Text style={s.eyebrow}>{selected.isToday ? 'Today’s prayer' : `${selected.day}’s prayer`}</Text>
+                <Text style={s.eyebrow}>{dayLabel(selected)}</Text>
                 {prayer.theme ? (
                   <View style={s.themePill}>
                     <Text style={s.themePillText}>{prayer.theme}</Text>
@@ -275,58 +331,23 @@ function PrayerScreen() {
           )}
         </View>
 
-        {/* Week list */}
+        {/* This week */}
         {days.length > 0 && (
           <>
             <Text style={s.sectionTitle}>This week</Text>
-            <View style={s.list}>
-              {days.map((d, i) => {
-                const isSelected = d.date === selected?.date;
-                const isPlaying = isSelected && status.playing;
-                const available = Boolean(d.prayer);
-                const sub = d.prayer
-                  ? `${d.isToday ? 'Today · ' : ''}${d.prayer.theme || d.day}`
-                  : d.isFuture
-                    ? `Arrives ${d.day}`
-                    : d.isToday
-                      ? 'Today · Coming soon'
-                      : 'Not posted';
-                return (
-                  <Pressable
-                    key={d.date}
-                    onPress={() => selectDay(d)}
-                    disabled={!available}
-                    accessibilityRole="button"
-                    accessibilityState={{ disabled: !available, selected: isSelected }}
-                    accessibilityLabel={`${d.day}: ${d.prayer ? d.prayer.title : sub}${isPlaying ? ', playing' : ''}`}
-                    style={({ pressed }) => [s.row, i < days.length - 1 && s.rowDivider, pressed && s.rowPressed]}
-                  >
-                    <View style={[s.dayBadge, isSelected && s.dayBadgeActive]}>
-                      <Text style={[s.dayBadgeText, isSelected && s.dayBadgeTextActive]}>{d.short}</Text>
-                    </View>
-                    <View style={s.rowText}>
-                      <Text style={[s.rowTitle, !available && s.rowTitleMuted]} numberOfLines={1}>
-                        {d.prayer ? d.prayer.title : d.day}
-                      </Text>
-                      <Text style={s.rowSub}>{sub}</Text>
-                    </View>
-                    {available && (
-                      <View style={[s.rowPlay, isSelected && s.rowPlayActive]}>
-                        {isPlaying ? (
-                          <PauseIcon color={t.onAccent} small />
-                        ) : (
-                          <PlayIcon color={isSelected ? t.onAccent : t.accent} small />
-                        )}
-                      </View>
-                    )}
-                  </Pressable>
-                );
-              })}
-            </View>
+            <View style={s.list}>{days.map((d, i) => renderRow(d, i, days.length, false))}</View>
           </>
         )}
 
-        <Text style={s.footer}>A new prayer for every day of the week. No account needed.</Text>
+        {/* Last week: only days that have a prayer */}
+        {lastWeek.length > 0 && (
+          <>
+            <Text style={s.sectionTitle}>Last week</Text>
+            <View style={s.list}>{lastWeek.map((d, i) => renderRow(d, i, lastWeek.length, true))}</View>
+          </>
+        )}
+
+        <Text style={s.footer}>A new prayer for every day. Listen to this week and last week anytime. No account needed.</Text>
       </ScrollView>
     </SafeAreaView>
   );

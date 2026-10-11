@@ -50,13 +50,13 @@ $$;
 alter table public.prayers enable row level security;
 alter table public.admins  enable row level security;
 
--- Listeners (anyone with the app) can read published prayers from roughly the
--- current week only. The 8-day window covers every time zone's "this week".
+-- Listeners (anyone with the app) can read published prayers from this week and
+-- last week. The 16-day window covers both weeks in every time zone.
 -- When the paid archive arrives, a second policy will grant subscribers more.
 drop policy if exists "listeners read this week" on public.prayers;
 create policy "listeners read this week" on public.prayers
   for select to anon, authenticated
-  using (published and prayer_date between current_date - 7 and current_date + 1);
+  using (published and prayer_date between current_date - 15 and current_date + 1);
 
 drop policy if exists "admins read all" on public.prayers;
 create policy "admins read all" on public.prayers
