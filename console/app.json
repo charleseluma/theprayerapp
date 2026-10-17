@@ -1,13 +1,15 @@
 {
   "expo": {
-    "name": "Prayer Uploads",
-    "slug": "theprayerapp-admin",
+    "name": "Prayer Admin Console",
+    "slug": "theprayerapp-console",
     "version": "1.0.0",
-    "platforms": ["web"],
+    "platforms": [
+      "web"
+    ],
     "userInterfaceStyle": "automatic",
     "web": {
       "output": "single",
-      "name": "Prayer Uploads",
+      "name": "Admin Console",
       "favicon": "../assets/favicon.png",
       "themeColor": "#A8742F"
     }

@@ -1,14 +1,17 @@
 name: Test build
 
 # Every push to main:
-#   1. checks both the listener app and the upload page,
-#   2. starts an Android test build of the listener app (install link on expo.dev → Builds),
-#   3. publishes the upload page to https://prayer-uploads-charleseluma.expo.app
+#   1. checks all three apps (listener app, Prayer Warriors, Admin Console),
+#   2. applies the database rules and deploys the account service to Supabase,
+#   3. publishes the Prayer Warriors web app and the Admin Console,
+#   4. starts Android test builds for whichever phone app changed
+#      (install links on expo.dev → Projects → Builds).
 #
-# Settings (GitHub → Settings → Secrets and variables → Actions):
-#   Secret   EXPO_TOKEN         – from expo.dev → Account settings → Access tokens
-#   Variable SUPABASE_URL       – Supabase → Project Settings → API → Project URL
-#   Variable SUPABASE_ANON_KEY  – Supabase → Project Settings → API → anon public key
+# GitHub → Settings → Secrets and variables → Actions:
+#   Secret   EXPO_TOKEN             expo.dev → Account settings → Access tokens
+#   Secret   SUPABASE_ACCESS_TOKEN  supabase.com → Account → Access Tokens
+#   Variable SUPABASE_URL           Supabase → Project Settings → Data API → Project URL
+#   Variable SUPABASE_ANON_KEY      Supabase → Project Settings → API Keys → anon / publishable key
 on:
   push:
     branches: [main]
@@ -20,114 +23,168 @@ concurrency:
 
 env:
   EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+  SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
   SUPABASE_URL: ${{ vars.SUPABASE_URL }}
   SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+  WARRIORS_URL: https://prayer-uploads-charleseluma.expo.app
+  CONSOLE_URL: https://prayer-admin-charleseluma.expo.app
 
 jobs:
   check:
     name: Check the code
     runs-on: ubuntu-latest
+    outputs:
+      listener: ${{ steps.changes.outputs.listener }}
+      warriors: ${{ steps.changes.outputs.warriors }}
     steps:
       - name: Report which settings GitHub can see
         run: |
-          for name in EXPO_TOKEN SUPABASE_URL SUPABASE_ANON_KEY; do
+          for name in EXPO_TOKEN SUPABASE_ACCESS_TOKEN SUPABASE_URL SUPABASE_ANON_KEY; do
             if [ -n "${!name}" ]; then echo "::notice::$name is set"; else echo "::error::$name is missing. Add it under Settings → Secrets and variables → Actions."; missing=1; fi
           done
-          # Fail loudly so a run without settings never shows a misleading green check.
           [ -z "$missing" ]
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Which phone apps changed
+        id: changes
+        run: |
+          if [ "${{ github.event_name }}" != "push" ] || [ "${{ github.event.before }}" = "0000000000000000000000000000000000000000" ]; then
+            echo "listener=true" >> "$GITHUB_OUTPUT"; echo "warriors=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          files=$(git diff --name-only "${{ github.event.before }}" "${{ github.sha }}")
+          echo "$files"
+          echo "$files" | grep -qvE '^(warriors|console|supabase|\.github)/|\.md$' && echo "listener=true" >> "$GITHUB_OUTPUT" || echo "listener=false" >> "$GITHUB_OUTPUT"
+          echo "$files" | grep -qE '^warriors/' && echo "warriors=true" >> "$GITHUB_OUTPUT" || echo "warriors=false" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: |
             package-lock.json
-            admin/package-lock.json
-      - name: Listener app — install
-        run: npm ci
-      - name: Listener app — typecheck
-        run: npx tsc --noEmit
+            warriors/package-lock.json
+            console/package-lock.json
+      - name: Listener app — install and typecheck
+        run: npm ci && npx tsc --noEmit
       - name: Listener app — web bundle builds
         run: npx expo export --platform web --output-dir dist
-      - name: Upload page — install
-        working-directory: admin
-        run: npm ci
-      - name: Upload page — typecheck
-        working-directory: admin
-        run: npx tsc --noEmit
+      - name: Prayer Warriors — install and typecheck
+        working-directory: warriors
+        run: npm ci && npx tsc --noEmit
+      - name: Admin Console — install and typecheck
+        working-directory: console
+        run: npm ci && npx tsc --noEmit
 
-  android-test-build:
-    name: Android test build
+  backend:
+    name: Update database and account service
     needs: check
     runs-on: ubuntu-latest
     steps:
-      - name: Check settings
-        id: ready
-        run: |
-          if [ -z "$EXPO_TOKEN" ]; then
-            echo "::warning::Add the EXPO_TOKEN secret to turn on Android test builds."
-            echo "go=false" >> "$GITHUB_OUTPUT"
-          else
-            [ -z "$SUPABASE_URL" ] && echo "::notice::SUPABASE_URL is not set, so this build uses demo prayers."
-            echo "go=true" >> "$GITHUB_OUTPUT"
-          fi
       - uses: actions/checkout@v4
-        if: steps.ready.outputs.go == 'true'
-      - uses: actions/setup-node@v4
-        if: steps.ready.outputs.go == 'true'
-        with:
-          node-version: 22
-          cache: npm
-      - if: steps.ready.outputs.go == 'true'
-        run: npm ci
-      - name: Point the app at the prayer service
-        if: steps.ready.outputs.go == 'true'
+      - name: Find the Supabase project
         run: |
-          printf 'EXPO_PUBLIC_SUPABASE_URL=%s\nEXPO_PUBLIC_SUPABASE_ANON_KEY=%s\n' "$SUPABASE_URL" "$SUPABASE_ANON_KEY" > .env
-      - name: Link this repo to the Expo project
-        if: steps.ready.outputs.go == 'true'
-        run: npx eas-cli@latest init --non-interactive --force
-      - name: Start Android build
-        if: steps.ready.outputs.go == 'true'
-        run: npx eas-cli@latest build --profile preview --platform android --non-interactive --no-wait
+          ref=$(echo "$SUPABASE_URL" | sed -E 's#^https://([a-z0-9]+)\.supabase\.co/?$#\1#')
+          if ! echo "$ref" | grep -qE '^[a-z0-9]{10,}$'; then echo "::error::SUPABASE_URL doesn't look like https://<project>.supabase.co"; exit 1; fi
+          echo "REF=$ref" >> "$GITHUB_ENV"
+      - name: Apply database rules (supabase/schema.sql)
+        run: |
+          jq -n --rawfile q supabase/schema.sql '{query: $q}' > query.json
+          curl -sS --fail-with-body -X POST "https://api.supabase.com/v1/projects/$REF/database/query" \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" -H "Content-Type: application/json" \
+            --data @query.json > /dev/null
+          echo "Database rules applied."
+      - name: Sign-in settings (link destination, 24-hour links, no public sign-up)
+        run: |
+          jq -n --arg site "$WARRIORS_URL" --arg allow "$WARRIORS_URL/**,$CONSOLE_URL/**,prayerwarriors://**" \
+            '{site_url: $site, uri_allow_list: $allow, mailer_otp_exp: 86400, disable_signup: true}' > auth.json
+          curl -sS --fail-with-body -X PATCH "https://api.supabase.com/v1/projects/$REF/config/auth" \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" -H "Content-Type: application/json" \
+            --data @auth.json > /dev/null
+          echo "Sign-in settings updated."
+      - name: Deploy the account service
+        run: npx --yes supabase@latest functions deploy team-admin --project-ref "$REF" --use-api --no-verify-jwt
 
-  deploy-upload-page:
-    name: Publish upload page
-    needs: check
+  warriors-web:
+    name: Publish Prayer Warriors (web)
+    needs: [check, backend]
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: admin
+        working-directory: warriors
     steps:
-      - name: Check settings
-        id: ready
-        working-directory: .
-        run: |
-          if [ -z "$EXPO_TOKEN" ] || [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_ANON_KEY" ]; then
-            echo "::warning::Add EXPO_TOKEN, SUPABASE_URL and SUPABASE_ANON_KEY to publish the upload page."
-            echo "go=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "go=true" >> "$GITHUB_OUTPUT"
-          fi
       - uses: actions/checkout@v4
-        if: steps.ready.outputs.go == 'true'
       - uses: actions/setup-node@v4
-        if: steps.ready.outputs.go == 'true'
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: admin/package-lock.json
-      - if: steps.ready.outputs.go == 'true'
-        run: npm ci
-      - name: Build the page
-        if: steps.ready.outputs.go == 'true'
+          cache-dependency-path: warriors/package-lock.json
+      - run: npm ci
+      - name: Build
         env:
           EXPO_PUBLIC_SUPABASE_URL: ${{ vars.SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
         run: npx expo export --platform web --output-dir dist
-      - name: Link to the Expo project
-        if: steps.ready.outputs.go == 'true'
-        run: npx eas-cli@latest init --non-interactive --force
-      - name: Publish
-        if: steps.ready.outputs.go == 'true'
-        run: npx eas-cli@latest deploy --prod --non-interactive --dev-domain prayer-uploads-charleseluma
+      - run: npx eas-cli@latest init --non-interactive --force
+      - run: npx eas-cli@latest deploy --prod --non-interactive --dev-domain prayer-uploads-charleseluma
+
+  console-web:
+    name: Publish Admin Console
+    needs: [check, backend]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: console
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: console/package-lock.json
+      - run: npm ci
+      - name: Build
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+          EXPO_PUBLIC_WARRIORS_URL: ${{ env.WARRIORS_URL }}
+        run: npx expo export --platform web --output-dir dist
+      - run: npx eas-cli@latest init --non-interactive --force
+      - run: npx eas-cli@latest deploy --prod --non-interactive --dev-domain prayer-admin-charleseluma
+
+  warriors-android:
+    name: Prayer Warriors Android test build
+    needs: [check, backend]
+    if: needs.check.outputs.warriors == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: warriors
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: warriors/package-lock.json
+      - run: npm ci
+      - name: Point the app at the prayer service
+        run: printf 'EXPO_PUBLIC_SUPABASE_URL=%s\nEXPO_PUBLIC_SUPABASE_ANON_KEY=%s\n' "$SUPABASE_URL" "$SUPABASE_ANON_KEY" > .env
+      - run: npx eas-cli@latest init --non-interactive --force
+      - run: npx eas-cli@latest build --profile preview --platform android --non-interactive --no-wait
+
+  listener-android:
+    name: Listener app Android test build
+    needs: check
+    if: needs.check.outputs.listener == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Point the app at the prayer service
+        run: printf 'EXPO_PUBLIC_SUPABASE_URL=%s\nEXPO_PUBLIC_SUPABASE_ANON_KEY=%s\n' "$SUPABASE_URL" "$SUPABASE_ANON_KEY" > .env
+      - run: npx eas-cli@latest init --non-interactive --force
+      - run: npx eas-cli@latest build --profile preview --platform android --non-interactive --no-wait

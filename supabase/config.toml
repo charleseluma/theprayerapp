@@ -1,0 +1,6 @@
+# Minimal Supabase CLI settings used by the pipeline to deploy the account service.
+project_id = "theprayerapp"
+
+[functions.team-admin]
+# The function checks the caller's sign-in itself (works with both old and new Supabase keys).
+verify_jwt = false

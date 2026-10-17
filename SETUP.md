@@ -1,43 +1,48 @@
-# Connecting the prayer service
+# Prayer App setup guide
 
-About 15 minutes, one time. After this you post prayers from the upload page and they appear in the app.
+## Already done
 
-## 1. Create the Supabase project
+- Supabase project, database and your administrator sign-in (`elumacharles@gmail.com`).
+- GitHub settings: `EXPO_TOKEN`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`.
 
-1. Sign in at supabase.com and choose **New project**.
-2. Name it `theprayerapp`, pick the region closest to most listeners (for example *East US*), and create a database password. Save the password in your password manager; you won't need it day to day.
-3. Wait for the project to finish setting up (about two minutes).
+## New: one more GitHub secret (about 3 minutes)
 
-## 2. Create the database
+The pipeline now updates the database and the account service itself, so you never need to paste SQL again. It needs a Supabase access token for that.
 
-1. In the left menu open **SQL Editor** and choose **New query**.
-2. Open `supabase/schema.sql` from the GitHub repo, copy all of it, and paste it in.
-3. If you'll sign in to the upload page with a different email than `elumacharles@gmail.com`, change the address on the last line.
-4. Press **Run**. You should see "Success. No rows returned."
+1. Go to **supabase.com/dashboard/account/tokens** (or click your profile picture at the top right in Supabase → **Account preferences** → **Access Tokens**).
+2. Click **Generate new token**, name it `github-theprayerapp`, and copy it. Supabase shows it only once.
+3. In GitHub, open `theprayerapp` → **Settings → Secrets and variables → Actions** → **Secrets** tab → **New repository secret**.
+4. Name it exactly `SUPABASE_ACCESS_TOKEN`, paste the token, and click **Add secret**. It belongs under **Repository secrets**, like `EXPO_TOKEN`.
+5. Open the **Actions** tab → **Test build** → **Run workflow**.
 
-## 3. Create your upload-page sign-in
+When the run is green:
+- **Admin Console:** https://prayer-admin-charleseluma.expo.app (sign in with your usual email and password)
+- **Prayer Warriors (web):** https://prayer-uploads-charleseluma.expo.app (this replaces the old upload page)
+- **Prayer Warriors (Android):** a new build appears on expo.dev under the **theprayerapp-admin** project → **Builds**
 
-1. Open **Authentication → Sign In / Providers** and turn **off** "Allow new users to sign up". Only you need an account.
-2. Open **Authentication → Users → Add user → Create new user**. Enter your email and a strong password, keep **Auto Confirm User** checked, and create it.
+## Adding a Prayer Warrior
 
-## 4. Give GitHub the connection details
+1. In the Admin Console, open **Prayer Warriors** → **Add a Prayer Warrior**.
+2. Enter their name and email, pick their days (optional), and click **Create sign-up link**.
+3. Copy the link and send it to them by text, WhatsApp or email. It works once and expires after 24 hours.
+4. They open it, choose a password, then sign in to the Prayer Warriors app on their phone.
 
-1. In Supabase open **Project Settings → API Keys** (or **Data API**). Copy the **Project URL** and the **anon / publishable** key. Never copy the `service_role` or secret key.
-2. In GitHub open the `theprayerapp` repository → **Settings → Secrets and variables → Actions**.
-3. On the **Variables** tab add:
-   - `SUPABASE_URL` = the Project URL
-   - `SUPABASE_ANON_KEY` = the anon / publishable key
-4. On the **Secrets** tab make sure `EXPO_TOKEN` exists (from expo.dev → Account settings → Access tokens).
-5. Open the **Actions** tab, choose **Test build**, and press **Run workflow**.
+If a link expires or someone forgets their password, click **New sign-in link** on their card.
 
-When the run finishes:
-- The upload page is live at **https://prayer-uploads-charleseluma.expo.app**
-- A new Android test build appears on expo.dev under **theprayerapp → Builds**
+## Reviewing prayers
 
-## Posting a prayer
+New submissions appear under **Review**, with a count on the tab. Listen, then **Approve**, or **Ask for changes** with a short note. The Prayer Warrior sees your note in their app.
 
-1. Open the upload page and sign in.
-2. Pick the day, choose the audio file, add a title (theme and description are optional).
-3. Press **Publish prayer**. Listeners get it the next time they open the app or pull down to refresh.
+## Testing it yourself
 
-A prayer for a future day is saved as **Scheduled** and appears on its day. Turning off **Visible to listeners** hides a prayer without deleting it. Past prayers are kept for the future paid archive.
+Administrators can't post prayers, so add yourself as a Prayer Warrior with a second email address. A Gmail "plus" address works, for example `elumacharles+warrior@gmail.com`. Nothing is emailed, so any address you control is fine.
+
+## Making someone else an administrator
+
+Ask Claude, or in Supabase → SQL Editor run (with their email), after they have a sign-in:
+
+```sql
+insert into public.admins (email) values ('their@email.com') on conflict do nothing;
+```
+
+The next pipeline run gives them administrator access.

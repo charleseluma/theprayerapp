@@ -1,0 +1,53 @@
+{
+  "expo": {
+    "name": "Prayer Warriors",
+    "slug": "theprayerapp-admin",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "prayerwarriors",
+    "userInterfaceStyle": "automatic",
+    "backgroundColor": "#F6F1E9",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#F6F1E9"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.charleseluma.prayerwarriors",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.charleseluma.prayerwarriors",
+      "adaptiveIcon": {
+        "backgroundColor": "#F6F1E9",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "output": "single",
+      "name": "Prayer Warriors",
+      "favicon": "./assets/favicon.png",
+      "themeColor": "#A8742F"
+    },
+    "plugins": [
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Prayer Warriors uses the microphone to record your prayers.",
+          "recordAudioAndroid": true,
+          "enableBackgroundPlayback": false,
+          "enableBackgroundRecording": false
+        }
+      ],
+      "expo-status-bar",
+      "expo-document-picker"
+    ]
+  }
+}

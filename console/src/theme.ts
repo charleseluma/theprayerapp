@@ -12,6 +12,9 @@ const light = {
   good: '#3F7A4A',
   goodSoft: '#E1EEDF',
   danger: '#B3412E',
+  dangerSoft: '#F6E0DA',
+  warn: '#8A5A00',
+  warnSoft: '#F7E7C6',
 };
 
 const dark: typeof light = {
@@ -26,6 +29,9 @@ const dark: typeof light = {
   good: '#8CC796',
   goodSoft: '#22321F',
   danger: '#F08D78',
+  dangerSoft: '#3A221D',
+  warn: '#E9B85C',
+  warnSoft: '#3A2E17',
 };
 
 export type Theme = typeof light;
