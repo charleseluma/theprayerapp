@@ -1,0 +1,38 @@
+name: Diagnose audio
+
+# Manual check of the most recent prayer recordings: stored size and type, and whether
+# the audio decodes. Results appear as notes on the run. Changes nothing.
+on:
+  workflow_dispatch:
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+    steps:
+      - name: Install ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null
+      - name: Inspect the latest recordings
+        run: |
+          ref=$(echo "$SUPABASE_URL" | sed -E 's#^https://([a-z0-9]+)\.supabase\.co/?$#\1#')
+          sql="select p.prayer_date::text as d, p.status, p.audio_path, p.duration_sec,
+                      o.metadata->>'size' as size, o.metadata->>'mimetype' as mime
+               from public.prayers p
+               left join storage.objects o on o.bucket_id = 'prayer-audio' and o.name = p.audio_path
+               order by p.created_at desc limit 6"
+          jq -n --arg q "$sql" '{query: $q, read_only: true}' > q.json
+          curl -sS --fail-with-body -X POST "https://api.supabase.com/v1/projects/$ref/database/query" \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" -H "Content-Type: application/json" --data @q.json > rows.json
+          jq -c '.[]' rows.json | while read -r row; do
+            path=$(echo "$row" | jq -r .audio_path)
+            url="$SUPABASE_URL/storage/v1/object/public/prayer-audio/$path"
+            code=$(curl -s -o audio.bin -D headers.txt -w '%{http_code}' "$url")
+            ctype=$(grep -i '^content-type:' headers.txt | tr -d '\r' | cut -d' ' -f2-)
+            bytes=$(stat -c %s audio.bin)
+            head=$(head -c 12 audio.bin | od -An -c | tr -s ' ' | head -c 60)
+            probe=$(ffprobe -v error -show_entries format=format_name,duration:stream=codec_name,channels,sample_rate -of compact=p=0:nk=1 audio.bin 2>&1 | tr '\n' ' ' | head -c 220)
+            decode=$(ffmpeg -v error -i audio.bin -f null - 2>&1 | head -c 200)
+            echo "::notice title=$(echo "$row" | jq -r '.d + " " + .status')::stored size=$(echo "$row" | jq -r .size) type=$(echo "$row" | jq -r .mime) | download http=$code bytes=$bytes content-type=$ctype | first bytes: $head | probe: $probe | decode errors: ${decode:-none}"
+          done
