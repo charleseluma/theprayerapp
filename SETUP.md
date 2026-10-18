@@ -20,7 +20,28 @@ When the run is green:
 - **Prayer Warriors (web):** https://prayer-uploads-charleseluma.expo.app (this replaces the old upload page)
 - **Prayer Warriors (Android):** a new build appears on expo.dev under the **theprayerapp-admin** project → **Builds**
 
-## Adding a Prayer Warrior
+## Email for self sign-up (Gmail)
+
+Self sign-up needs an email account that sends confirmation, password-reset and approval emails. Until it's set up, the "Create an account" button tells people sign-ups aren't open yet, and invite links keep working.
+
+1. Create a new Gmail account just for the app (for example `theprayerapp.team@gmail.com`).
+2. Turn on 2-Step Verification: myaccount.google.com → Security → 2-Step Verification.
+3. Create an app password: myaccount.google.com/apppasswords → name it `Prayer App` → copy the 16-character password.
+4. In GitHub → Settings → Secrets and variables → Actions → **Repository secrets**, add:
+   - `SMTP_USER` = the Gmail address
+   - `SMTP_PASSWORD` = the app password
+5. Run **Actions → Test build → Run workflow**. The "Check the code" step should say *Email sending is set up*.
+
+Gmail sends up to about 500 emails a day. To send from your own domain later (for example with Resend), only these settings change.
+
+## How self sign-up works
+
+1. In the Prayer Warriors app, a person taps **Create an account** and fills in their name, email, password, phone, church, who referred them, and an optional note.
+2. They confirm their email with the link they receive.
+3. They can sign in right away, but recording is locked. They can practice recording, read the guide, listen to prayers and edit their profile.
+4. In the Admin Console → **Requests**, approve them (and pick their days) or decline with a note. They get an email either way and see the result in the app.
+
+## Adding a Prayer Warrior yourself
 
 1. In the Admin Console, open **Prayer Warriors** → **Add a Prayer Warrior**.
 2. Enter their name and email, pick their days (optional), and click **Create sign-up link**.

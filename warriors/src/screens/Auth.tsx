@@ -5,7 +5,19 @@ import { friendlyError, supabase } from '../supabase';
 import type { Theme } from '../theme';
 import { Banner, Button, Field, type Styles } from '../ui';
 
-export function SignIn({ s, t, notice }: { s: Styles; t: Theme; notice?: string | null }) {
+export function SignIn({
+  s,
+  t,
+  notice,
+  onCreate,
+  onForgot,
+}: {
+  s: Styles;
+  t: Theme;
+  notice?: { tone: 'good' | 'warn'; text: string } | null;
+  onCreate: () => void;
+  onForgot: () => void;
+}) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -30,8 +42,8 @@ export function SignIn({ s, t, notice }: { s: Styles; t: Theme; notice?: string 
       <Text style={s.h1}>Prayer Warriors</Text>
       <Text style={[s.body, { marginBottom: 6 }]}>Sign in to record and submit the daily prayers.</Text>
       {notice ? (
-        <Banner s={s} t={t} tone="warn">
-          {notice}
+        <Banner s={s} t={t} tone={notice.tone}>
+          {notice.text}
         </Banner>
       ) : null}
       <Field
@@ -61,9 +73,13 @@ export function SignIn({ s, t, notice }: { s: Styles; t: Theme; notice?: string 
       <View style={{ marginTop: 18 }}>
         <Button s={s} t={t} label="Sign in" onPress={submit} busy={busy} />
       </View>
-      <Text style={[s.small, { marginTop: 14, textAlign: 'center' }]}>
-        New, or forgot your password? Ask your administrator to send you a link.
+      <Text onPress={onForgot} style={[s.link, { marginTop: 14, textAlign: 'center' }]} accessibilityRole="link">
+        Forgot your password?
       </Text>
+      <View style={{ marginTop: 18, borderTopWidth: 1, borderTopColor: t.line, paddingTop: 18, gap: 10 }}>
+        <Text style={[s.body, { textAlign: 'center' }]}>New to the Prayer Warriors?</Text>
+        <Button s={s} t={t} kind="secondary" label="Create an account" onPress={onCreate} />
+      </View>
     </View>
   );
 }

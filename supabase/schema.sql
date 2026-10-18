@@ -51,6 +51,22 @@ create table if not exists public.profiles (
   last_sign_in_at timestamptz
 );
 
+-- Self sign-up: a person who creates their own account waits for an administrator's approval.
+-- People added before sign-up existed count as approved.
+alter table public.profiles add column if not exists approval text not null default 'approved'
+  check (approval in ('pending', 'approved', 'declined'));
+alter table public.profiles alter column approval set default 'pending';
+alter table public.profiles add column if not exists phone text not null default '' check (char_length(phone) <= 40);
+alter table public.profiles add column if not exists church text not null default '' check (char_length(church) <= 120);
+alter table public.profiles add column if not exists referred_by text not null default '' check (char_length(referred_by) <= 120);
+alter table public.profiles add column if not exists about text not null default '' check (char_length(about) <= 1000);
+alter table public.profiles add column if not exists decline_reason text not null default '' check (char_length(decline_reason) <= 400);
+alter table public.profiles add column if not exists email_confirmed boolean not null default true;
+alter table public.profiles alter column email_confirmed set default false;
+alter table public.profiles add column if not exists approved_at timestamptz;
+alter table public.profiles add column if not exists approved_by uuid references auth.users (id) on delete set null;
+create index if not exists profiles_approval_idx on public.profiles (approval, created_at);
+
 -- What people did, for the Admin Console's activity view.
 create table if not exists public.activity (
   id           bigint generated always as identity primary key,
@@ -95,7 +111,7 @@ create or replace function public.is_warrior() returns boolean
 language sql stable security definer set search_path = public as $$
   select exists (
     select 1 from public.profiles
-    where id = auth.uid() and role = 'warrior' and status = 'active'
+    where id = auth.uid() and role = 'warrior' and status = 'active' and approval = 'approved'
   );
 $$;
 
@@ -110,7 +126,7 @@ language sql stable security definer set search_path = public as $$
     and (
       not exists (
         select 1 from public.profiles p
-        where p.role = 'warrior' and p.status = 'active'
+        where p.role = 'warrior' and p.status = 'active' and p.approval = 'approved'
           and extract(dow from d)::smallint = any (p.assigned_days)
       )
       or exists (
@@ -130,7 +146,7 @@ returns table (id uuid, full_name text, assigned_days smallint[])
 language sql stable security definer set search_path = public as $$
   select p.id, p.full_name, p.assigned_days
   from public.profiles p
-  where p.role = 'warrior' and p.status = 'active'
+  where p.role = 'warrior' and p.status = 'active' and p.approval = 'approved'
     and (public.is_warrior() or public.is_admin());
 $$;
 
@@ -274,9 +290,17 @@ begin
   if auth.uid() is null then
     return new;
   end if;
-  if (new.id, new.email, new.role, new.status, new.invited_by, new.created_at, new.removed_at)
-     is distinct from (old.id, old.email, old.role, old.status, old.invited_by, old.created_at, old.removed_at) then
-    raise exception 'Use the Admin Console to add, remove or restore people.';
+  -- Account, role and approval changes only happen through the account service.
+  if (new.id, new.email, new.role, new.status, new.invited_by, new.created_at, new.removed_at,
+      new.approval, new.decline_reason, new.approved_at, new.approved_by, new.email_confirmed, new.referred_by)
+     is distinct from
+     (old.id, old.email, old.role, old.status, old.invited_by, old.created_at, old.removed_at,
+      old.approval, old.decline_reason, old.approved_at, old.approved_by, old.email_confirmed, old.referred_by) then
+    raise exception 'Use the Admin Console to add, approve, remove or restore people.';
+  end if;
+  -- People editing their own profile can change their details, not their days.
+  if new.id = auth.uid() and not public.is_admin() and new.assigned_days is distinct from old.assigned_days then
+    raise exception 'Days are assigned by an administrator.';
   end if;
   return new;
 end $$;
@@ -304,6 +328,66 @@ end $$;
 drop trigger if exists profiles_log on public.profiles;
 create trigger profiles_log after update on public.profiles
   for each row execute function public.profiles_log();
+
+-- ═══ Self sign-up ═══════════════════════════════════════════════════════════
+
+-- Every new sign-in gets a profile. People who sign up in the app start as pending requests;
+-- people invited from the Admin Console are approved by the account service right after.
+create or replace function public.handle_new_user() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare
+  meta jsonb := coalesce(new.raw_user_meta_data, '{}'::jsonb);
+begin
+  insert into public.profiles (id, email, full_name, phone, church, referred_by, about, role, status, approval, email_confirmed)
+  values (
+    new.id, new.email,
+    left(coalesce(meta->>'full_name', ''), 80),
+    left(coalesce(meta->>'phone', ''), 40),
+    left(coalesce(meta->>'church', ''), 120),
+    left(coalesce(meta->>'referred_by', ''), 120),
+    left(coalesce(meta->>'about', ''), 1000),
+    'warrior', 'active', 'pending', new.email_confirmed_at is not null
+  )
+  on conflict (id) do nothing;
+  if meta->>'source' = 'signup' then
+    perform public.log_activity('requested', null, new.id, coalesce(nullif(meta->>'full_name', ''), new.email), '', new.id);
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created after insert on auth.users
+  for each row execute function public.handle_new_user();
+
+create or replace function public.handle_email_confirmed() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if old.email_confirmed_at is null and new.email_confirmed_at is not null then
+    update public.profiles set email_confirmed = true where id = new.id;
+    if exists (select 1 from public.profiles where id = new.id and approval = 'pending') then
+      perform public.log_activity('confirmed_email', null, new.id, '', '', new.id);
+    end if;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists on_auth_email_confirmed on auth.users;
+create trigger on_auth_email_confirmed after update of email_confirmed_at on auth.users
+  for each row execute function public.handle_email_confirmed();
+
+-- Email settings for the account service (approval emails). Only the service role can read them.
+create table if not exists public.app_settings (
+  key   text primary key,
+  value text not null
+);
+alter table public.app_settings enable row level security;
+revoke all on public.app_settings from anon, authenticated;
+
+create or replace function public.get_email_settings() returns jsonb
+language sql stable security definer set search_path = public as $$
+  select coalesce(jsonb_object_agg(key, value), '{}'::jsonb) from public.app_settings where key like 'smtp_%';
+$$;
+revoke execute on function public.get_email_settings() from public, anon, authenticated;
 
 -- ═══ Row-level security ═════════════════════════════════════════════════════
 
@@ -354,6 +438,10 @@ create policy "read own profile" on public.profiles
 drop policy if exists "admins read profiles" on public.profiles;
 create policy "admins read profiles" on public.profiles
   for select to authenticated using (public.is_admin());
+
+drop policy if exists "edit own profile" on public.profiles;
+create policy "edit own profile" on public.profiles
+  for update to authenticated using (id = auth.uid()) with check (id = auth.uid());
 
 drop policy if exists "admins update profiles" on public.profiles;
 create policy "admins update profiles" on public.profiles

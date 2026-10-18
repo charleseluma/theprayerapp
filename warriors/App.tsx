@@ -1,16 +1,17 @@
 import './src/polyfills';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, AppState, Platform, ScrollView, Text, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import type { Session } from '@supabase/supabase-js';
 
-import { Home } from './src/screens/Board';
 import { NoAccess, SetPassword, SignIn } from './src/screens/Auth';
-import { authLink, isConfigured, supabase, type Profile } from './src/supabase';
+import { CheckEmail, ForgotPassword, SignUp } from './src/screens/SignUp';
+import { Shell } from './src/Shell';
+import { authLink, isConfigured, PROFILE_FIELDS, supabase, type Profile } from './src/supabase';
 import { useTheme } from './src/theme';
-import { makeStyles } from './src/ui';
+import { Banner, makeStyles } from './src/ui';
 
 export default function App() {
   return (
@@ -20,14 +21,18 @@ export default function App() {
   );
 }
 
+type Screen = { kind: 'signin' } | { kind: 'signup' } | { kind: 'check-email'; email: string } | { kind: 'forgot' };
+
 function Root() {
   const t = useTheme();
   const s = useMemo(() => makeStyles(t), [t]);
   const [session, setSession] = useState<Session | null | undefined>(isConfigured ? undefined : null);
   const [profile, setProfile] = useState<Profile | null | undefined>(undefined);
+  const [screen, setScreen] = useState<Screen>({ kind: 'signin' });
   const [needsPassword, setNeedsPassword] = useState(authLink.type === 'invite' || authLink.type === 'recovery');
-  const [linkNotice, setLinkNotice] = useState<string | null>(
-    authLink.error ? 'That link has expired or was already used. Ask your administrator to send a new one.' : null,
+  const [justConfirmed, setJustConfirmed] = useState(authLink.type === 'signup');
+  const [linkNotice, setLinkNotice] = useState<{ tone: 'good' | 'warn'; text: string } | null>(
+    authLink.error ? { tone: 'warn', text: 'That link has expired or was already used. Sign in, or request a new link.' } : null,
   );
 
   useEffect(() => {
@@ -36,78 +41,107 @@ function Root() {
     const { data } = supabase.auth.onAuthStateChange((event, next) => {
       setSession(next);
       if (event === 'PASSWORD_RECOVERY') setNeedsPassword(true);
-      if (event === 'SIGNED_OUT') setNeedsPassword(false);
+      if (event === 'SIGNED_OUT') {
+        setNeedsPassword(false);
+        setScreen({ kind: 'signin' });
+      }
     });
-    // Keep the sign-in fresh only while the app is on screen (phones).
-    const sub =
-      Platform.OS === 'web'
-        ? null
-        : AppState.addEventListener('change', (state) => {
-            if (state === 'active') supabase!.auth.startAutoRefresh();
-            else supabase!.auth.stopAutoRefresh();
-          });
-    return () => {
-      data.subscription.unsubscribe();
-      sub?.remove();
-    };
+    return () => data.subscription.unsubscribe();
   }, []);
 
-  // Clear invitation details from the address bar once they've been used.
+  // Clear link details from the address bar once they've been used.
   useEffect(() => {
     if (Platform.OS === 'web' && session && typeof window !== 'undefined' && window.location.hash) {
       window.history.replaceState(null, '', window.location.pathname);
     }
   }, [session]);
 
-  useEffect(() => {
+  const loadProfile = useCallback(async () => {
     if (!supabase || !session) {
       setProfile(undefined);
       return;
     }
-    supabase
-      .from('profiles')
-      .select('id,email,full_name,role,status,assigned_days')
-      .eq('id', session.user.id)
-      .maybeSingle()
-      .then(({ data }) => setProfile((data as Profile | null) ?? null));
+    const { data } = await supabase.from('profiles').select(PROFILE_FIELDS).eq('id', session.user.id).maybeSingle();
+    setProfile((data as Profile | null) ?? null);
   }, [session?.user.id]);
 
-  let content: React.ReactNode;
+  useEffect(() => {
+    loadProfile();
+  }, [loadProfile]);
+
+  // Phones: keep the sign-in fresh while on screen, and pick up approval changes when the app reopens.
+  useEffect(() => {
+    if (Platform.OS === 'web' || !supabase) return;
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        supabase!.auth.startAutoRefresh();
+        loadProfile();
+      } else supabase!.auth.stopAutoRefresh();
+    });
+    return () => sub.remove();
+  }, [loadProfile]);
+
+  const frame = (content: React.ReactNode) => (
+    <SafeAreaView style={s.screen} edges={['top', 'left', 'right', 'bottom']}>
+      <StatusBar style="auto" />
+      <ScrollView contentContainerStyle={[s.page, { paddingTop: 32, maxWidth: 480 }]} keyboardShouldPersistTaps="handled">
+        {content}
+      </ScrollView>
+    </SafeAreaView>
+  );
+
   if (!isConfigured) {
-    content = (
+    return frame(
       <View style={s.panel}>
         <Text style={s.h2}>Prayer Warriors</Text>
         <Text style={s.body}>This build isn’t connected to the prayer service yet.</Text>
-      </View>
+      </View>,
     );
-  } else if (session === undefined || (session && profile === undefined)) {
-    content = <ActivityIndicator color={t.accent} style={{ marginTop: 80 }} />;
-  } else if (!session) {
-    content = <SignIn s={s} t={t} notice={linkNotice} />;
-  } else if (!profile) {
-    content = (
+  }
+  if (session === undefined || (session && profile === undefined)) {
+    return frame(<ActivityIndicator color={t.accent} style={{ marginTop: 80 }} />);
+  }
+
+  if (!session) {
+    switch (screen.kind) {
+      case 'signup':
+        return frame(<SignUp s={s} t={t} onBack={() => setScreen({ kind: 'signin' })} onDone={(email) => setScreen({ kind: 'check-email', email })} />);
+      case 'check-email':
+        return frame(<CheckEmail s={s} t={t} email={screen.email} onBack={() => setScreen({ kind: 'signin' })} />);
+      case 'forgot':
+        return frame(<ForgotPassword s={s} t={t} onBack={() => setScreen({ kind: 'signin' })} />);
+      default:
+        return frame(
+          <SignIn s={s} t={t} notice={linkNotice} onCreate={() => setScreen({ kind: 'signup' })} onForgot={() => setScreen({ kind: 'forgot' })} />,
+        );
+    }
+  }
+
+  if (!profile) {
+    return frame(
       <NoAccess
         s={s}
         t={t}
         title="No Prayer Warrior account"
-        message={`You’re signed in as ${session.user.email}, but there’s no Prayer Warrior account for this email. Ask your administrator to add you.`}
-      />
+        message={`You’re signed in as ${session.user.email}, but there’s no Prayer Warrior account for this email. Create an account, or ask an administrator to add you.`}
+      />,
     );
-  } else if (profile.status !== 'active') {
-    content = (
-      <NoAccess s={s} t={t} title="Your access has been removed" message="Contact your administrator if you think this is a mistake." />
-    );
-  } else if (profile.role === 'admin') {
-    content = (
+  }
+  if (profile.status !== 'active') {
+    return frame(<NoAccess s={s} t={t} title="Your access has been removed" message="Contact your administrator if you think this is a mistake." />);
+  }
+  if (profile.role === 'admin') {
+    return frame(
       <NoAccess
         s={s}
         t={t}
         title="This app is for Prayer Warriors"
         message="Administrators manage Prayer Warriors and review prayers in the Admin Console."
-      />
+      />,
     );
-  } else if (needsPassword) {
-    content = (
+  }
+  if (needsPassword) {
+    return frame(
       <SetPassword
         s={s}
         t={t}
@@ -116,23 +150,34 @@ function Root() {
           setNeedsPassword(false);
           setLinkNotice(null);
         }}
-      />
-    );
-  } else {
-    return (
-      <SafeAreaView style={s.screen} edges={['top', 'left', 'right']}>
-        <StatusBar style="auto" />
-        <Home s={s} t={t} profile={profile} />
-      </SafeAreaView>
+      />,
     );
   }
 
   return (
     <SafeAreaView style={s.screen} edges={['top', 'left', 'right']}>
       <StatusBar style="auto" />
-      <ScrollView contentContainerStyle={[s.page, { paddingTop: 40, maxWidth: 460 }]} keyboardShouldPersistTaps="handled">
-        {content}
-      </ScrollView>
+      <Shell
+        s={s}
+        t={t}
+        profile={profile}
+        onProfile={setProfile}
+        onRefresh={loadProfile}
+        banner={
+          justConfirmed ? (
+            <View style={{ paddingHorizontal: 16, paddingTop: 12, maxWidth: 720, width: '100%', alignSelf: 'center' }}>
+              <Banner s={s} t={t} tone="good" title="Your email is confirmed">
+                <Text style={{ color: t.ink, fontSize: 14, lineHeight: 20 }}>
+                  You can now sign in to the Prayer Warriors app on your phone with your email and password.{' '}
+                  <Text style={s.link} onPress={() => setJustConfirmed(false)}>
+                    Dismiss
+                  </Text>
+                </Text>
+              </Banner>
+            </View>
+          ) : null
+        }
+      />
     </SafeAreaView>
   );
 }

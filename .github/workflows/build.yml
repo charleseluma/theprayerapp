@@ -12,6 +12,9 @@ name: Test build
 #   Secret   SUPABASE_ACCESS_TOKEN  supabase.com → Account → Access Tokens
 #   Variable SUPABASE_URL           Supabase → Project Settings → Data API → Project URL
 #   Variable SUPABASE_ANON_KEY      Supabase → Project Settings → API Keys → anon / publishable key
+#   Secret   SMTP_USER              Gmail address that sends sign-up and approval emails (optional)
+#   Secret   SMTP_PASSWORD          Google app password for that Gmail address (optional)
+#   Without the SMTP secrets, self sign-up stays closed and everything else works.
 on:
   push:
     branches: [main]
@@ -26,6 +29,8 @@ env:
   SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
   SUPABASE_URL: ${{ vars.SUPABASE_URL }}
   SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+  SMTP_USER: ${{ secrets.SMTP_USER }}
+  SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
   WARRIORS_URL: https://prayer-uploads-charleseluma.expo.app
   CONSOLE_URL: https://prayer-admin-charleseluma.expo.app
 
@@ -43,6 +48,7 @@ jobs:
             if [ -n "${!name}" ]; then echo "::notice::$name is set"; else echo "::error::$name is missing. Add it under Settings → Secrets and variables → Actions."; missing=1; fi
           done
           [ -z "$missing" ]
+          if [ -z "$SMTP_USER" ] || [ -z "$SMTP_PASSWORD" ]; then echo "::warning::SMTP_USER / SMTP_PASSWORD not set: self sign-up stays closed and no emails are sent."; else echo "::notice::Email sending is set up"; fi
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -93,10 +99,32 @@ jobs:
             -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" -H "Content-Type: application/json" \
             --data @query.json > /dev/null
           echo "Database rules applied."
-      - name: Sign-in settings (link destination, 24-hour links, no public sign-up)
+      - name: Sign-in and email settings
         run: |
-          jq -n --arg site "$WARRIORS_URL" --arg allow "$WARRIORS_URL/**,$CONSOLE_URL/**,prayerwarriors://**" \
-            '{site_url: $site, uri_allow_list: $allow, mailer_otp_exp: 86400, disable_signup: true}' > auth.json
+          allow="$WARRIORS_URL/**,$CONSOLE_URL/**,prayerwarriors://**"
+          if [ -n "$SMTP_USER" ] && [ -n "$SMTP_PASSWORD" ]; then
+            # Self sign-up with email confirmation, sent through the Gmail account.
+            jq -n --arg site "$WARRIORS_URL" --arg allow "$allow" --arg user "$SMTP_USER" --arg pass "$SMTP_PASSWORD" \
+              --rawfile confirm supabase/templates/confirmation.html --rawfile recovery supabase/templates/recovery.html \
+              '{site_url: $site, uri_allow_list: $allow, mailer_otp_exp: 86400, password_min_length: 8,
+                disable_signup: false, external_email_enabled: true, mailer_autoconfirm: false,
+                smtp_host: "smtp.gmail.com", smtp_port: "465", smtp_user: $user, smtp_pass: ($pass | gsub(" "; "")),
+                smtp_admin_email: $user, smtp_sender_name: "The Prayer App", rate_limit_email_sent: 100,
+                mailer_subjects_confirmation: "Confirm your Prayer Warriors account",
+                mailer_templates_confirmation_content: $confirm,
+                mailer_subjects_recovery: "Reset your Prayer Warriors password",
+                mailer_templates_recovery_content: $recovery}' > auth.json
+            # The account service uses the same account for approval emails.
+            jq -n --arg user "$SMTP_USER" --arg pass "$SMTP_PASSWORD" \
+              '{query: ("insert into public.app_settings (key, value) values (\u0027smtp_user\u0027, \u0027" + ($user | gsub("\u0027"; "\u0027\u0027")) + "\u0027), (\u0027smtp_password\u0027, \u0027" + ($pass | gsub(" "; "") | gsub("\u0027"; "\u0027\u0027")) + "\u0027) on conflict (key) do update set value = excluded.value")}' > smtp.json
+            curl -sS --fail-with-body -X POST "https://api.supabase.com/v1/projects/$REF/database/query" \
+              -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" -H "Content-Type: application/json" --data @smtp.json > /dev/null
+            echo "Self sign-up is open; emails are sent from $SMTP_USER."
+          else
+            jq -n --arg site "$WARRIORS_URL" --arg allow "$allow" \
+              '{site_url: $site, uri_allow_list: $allow, mailer_otp_exp: 86400, password_min_length: 8, disable_signup: true}' > auth.json
+            echo "Self sign-up stays closed until SMTP_USER and SMTP_PASSWORD are added."
+          fi
           curl -sS --fail-with-body -X PATCH "https://api.supabase.com/v1/projects/$REF/config/auth" \
             -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" -H "Content-Type: application/json" \
             --data @auth.json > /dev/null
@@ -123,6 +151,7 @@ jobs:
         env:
           EXPO_PUBLIC_SUPABASE_URL: ${{ vars.SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+          EXPO_PUBLIC_WARRIORS_URL: ${{ env.WARRIORS_URL }}
         run: npx expo export --platform web --output-dir dist
       - run: npx eas-cli@latest init --non-interactive --force
       - run: npx eas-cli@latest deploy --prod --non-interactive --dev-domain prayer-uploads-charleseluma
@@ -168,7 +197,7 @@ jobs:
           cache-dependency-path: warriors/package-lock.json
       - run: npm ci
       - name: Point the app at the prayer service
-        run: printf 'EXPO_PUBLIC_SUPABASE_URL=%s\nEXPO_PUBLIC_SUPABASE_ANON_KEY=%s\n' "$SUPABASE_URL" "$SUPABASE_ANON_KEY" > .env
+        run: printf 'EXPO_PUBLIC_SUPABASE_URL=%s\nEXPO_PUBLIC_SUPABASE_ANON_KEY=%s\nEXPO_PUBLIC_WARRIORS_URL=%s\n' "$SUPABASE_URL" "$SUPABASE_ANON_KEY" "$WARRIORS_URL" > .env
       - run: npx eas-cli@latest init --non-interactive --force
       - run: npx eas-cli@latest build --profile preview --platform android --non-interactive --no-wait
 

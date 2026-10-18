@@ -4,14 +4,16 @@ import type { Session } from '@supabase/supabase-js';
 
 import { ActivityLog } from './src/screens/ActivityLog';
 import { People } from './src/screens/People';
+import { Requests } from './src/screens/Requests';
 import { Review } from './src/screens/Review';
 import { friendlyError, isConfigured, supabase, type Profile } from './src/supabase';
 import { useTheme, type Theme } from './src/theme';
 import { Button, Field, makeStyles, type Styles } from './src/ui';
 
-type Tab = 'review' | 'people' | 'activity';
+type Tab = 'review' | 'requests' | 'people' | 'activity';
 const TABS: { key: Tab; label: string }[] = [
   { key: 'review', label: 'Review' },
+  { key: 'requests', label: 'Requests' },
   { key: 'people', label: 'Prayer Warriors' },
   { key: 'activity', label: 'Activity' },
 ];
@@ -156,6 +158,7 @@ function Console({ s, t, me }: { s: Styles; t: Theme; me: Profile }) {
   }, [loadPeople]);
 
   const byId = useMemo(() => new Map(people.map((p) => [p.id, p])), [people]);
+  const requestCount = people.filter((p) => p.role === 'warrior' && p.approval === 'pending').length;
   const onCount = useCallback((n: number) => setPendingCount(n), []);
 
   return (
@@ -174,7 +177,7 @@ function Console({ s, t, me }: { s: Styles; t: Theme; me: Profile }) {
               </Pressable>
             </View>
           </View>
-          <View style={{ flexDirection: 'row', gap: 4 }} accessibilityRole="tablist">
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 2 }} accessibilityRole="tablist">
             {TABS.map((x) => {
               const on = x.key === tab;
               return (
@@ -185,7 +188,7 @@ function Console({ s, t, me }: { s: Styles; t: Theme; me: Profile }) {
                   accessibilityState={{ selected: on }}
                   style={{
                     paddingVertical: 10,
-                    paddingHorizontal: 12,
+                    paddingHorizontal: 10,
                     borderBottomWidth: 3,
                     borderBottomColor: on ? t.accent : 'transparent',
                     flexDirection: 'row',
@@ -194,9 +197,11 @@ function Console({ s, t, me }: { s: Styles; t: Theme; me: Profile }) {
                   }}
                 >
                   <Text style={{ color: on ? t.ink : t.muted, fontWeight: '600', fontSize: 15 }}>{x.label}</Text>
-                  {x.key === 'review' && pendingCount ? (
+                  {(x.key === 'review' ? pendingCount : x.key === 'requests' ? requestCount : 0) ? (
                     <View style={{ backgroundColor: t.warn, borderRadius: 999, minWidth: 20, paddingHorizontal: 6, alignItems: 'center' }}>
-                      <Text style={{ color: t.card, fontSize: 12, fontWeight: '700' }}>{pendingCount}</Text>
+                      <Text style={{ color: t.card, fontSize: 12, fontWeight: '700' }}>
+                        {x.key === 'review' ? pendingCount : requestCount}
+                      </Text>
                     </View>
                   ) : null}
                 </Pressable>
@@ -209,6 +214,7 @@ function Console({ s, t, me }: { s: Styles; t: Theme; me: Profile }) {
       <View style={{ maxWidth: 1040, width: '100%', alignSelf: 'center', paddingHorizontal: 16, paddingTop: 22 }}>
         {loadError ? <Text style={s.error}>{loadError}</Text> : null}
         {tab === 'review' ? <Review s={s} t={t} people={byId} onCountChange={onCount} /> : null}
+ {tab === 'requests' ? <Requests s={s} t={t} people={people} onChanged={loadPeople} /> : null}
         {tab === 'people' ? <People s={s} t={t} people={people} counts={counts} onChanged={loadPeople} /> : null}
         {tab === 'activity' ? <ActivityLog s={s} t={t} people={people} /> : null}
       </View>

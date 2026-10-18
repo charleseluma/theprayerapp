@@ -53,6 +53,16 @@ function describe(a: Activity): { text: string; tone: 'good' | 'danger' | 'accen
       return { text: `removed ${a.subject_name}`, tone: 'danger' };
     case 'restored':
       return { text: `restored access for ${a.subject_name}`, tone: 'good' };
+    case 'requested':
+      return { text: 'signed up and requested to join', tone: 'accent' };
+    case 'confirmed_email':
+      return { text: 'confirmed their email', tone: 'neutral' };
+    case 'approved_access':
+      return { text: `approved ${a.subject_name}${a.details ? ` (days: ${a.details})` : ''}`, tone: 'good' };
+    case 'declined_access':
+      return { text: `declined ${a.subject_name}${a.details ? `: “${a.details}”` : ''}`, tone: 'danger' };
+    case 'deleted_account':
+      return { text: 'deleted their account', tone: 'danger' };
     case 'days_changed':
       return { text: `set ${a.subject_name}’s days to ${a.details}`, tone: 'neutral' };
     default:

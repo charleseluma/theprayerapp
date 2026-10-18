@@ -41,6 +41,14 @@ export type Profile = {
   created_at: string;
   removed_at: string | null;
   last_sign_in_at: string | null;
+  approval: 'pending' | 'approved' | 'declined';
+  decline_reason: string;
+  email_confirmed: boolean;
+  approved_at: string | null;
+  phone: string;
+  church: string;
+  referred_by: string;
+  about: string;
 };
 
 export type Activity = {

@@ -10,8 +10,8 @@ Three apps share one Supabase project:
 
 ## How a prayer gets to listeners
 
-1. An administrator adds a Prayer Warrior in the Admin Console and assigns their days. The console creates a private sign-up link to send them.
-2. The Prayer Warrior opens the link, chooses a password, and signs in to the Prayer Warriors app.
+1. A Prayer Warrior joins in one of two ways: they **create an account** in the Prayer Warriors app (confirm their email, then wait for an administrator to approve them under **Requests**), or an administrator **adds** them in the Admin Console and sends them a private sign-up link.
+2. Until approved, they can practice recording, read the recording guide, listen to recent prayers and edit their profile, but can't submit prayers.
 3. They record a prayer with the phone's microphone (or choose an audio file) for their day or any open day, then submit it.
 4. The prayer waits for review. An administrator listens in the Admin Console and approves it, or asks for changes with a note.
 5. Approved prayers appear in The Prayer App on their day. Listeners can play this week and last week; older prayers are kept for a future paid archive.
@@ -26,7 +26,8 @@ Rules, enforced by the database (`supabase/schema.sql`):
 | Folder | What it is |
 | --- | --- |
 | `supabase/schema.sql` | Tables, security rules, activity triggers and audio storage. Applied automatically by the pipeline. |
-| `supabase/functions/team-admin/` | Account service: invite, new sign-in link, remove, restore (needs the service role, so it runs on Supabase). |
+| `supabase/functions/team-admin/` | Account service: invite, new sign-in link, approve, decline, remove, restore, delete own account, approval emails (needs the service role, so it runs on Supabase). |
+| `supabase/templates/` | Confirmation and password-reset email templates, applied by the pipeline. |
 
 ## Pipeline
 
@@ -39,7 +40,7 @@ Every push to `main` runs `.github/workflows/build.yml`:
 | Web apps | Publishes Prayer Warriors (web) and the Admin Console. |
 | Android test builds | Builds whichever phone app changed. Install links are on expo.dev → Projects → Builds. |
 
-Settings (GitHub → Settings → Secrets and variables → Actions): secrets `EXPO_TOKEN`, `SUPABASE_ACCESS_TOKEN`; variables `SUPABASE_URL`, `SUPABASE_ANON_KEY`. See SETUP.md.
+Settings (GitHub → Settings → Secrets and variables → Actions): secrets `EXPO_TOKEN`, `SUPABASE_ACCESS_TOKEN`, and optionally `SMTP_USER` / `SMTP_PASSWORD` (Gmail, enables self sign-up and emails); variables `SUPABASE_URL`, `SUPABASE_ANON_KEY`. See SETUP.md.
 
 ## For developers
 

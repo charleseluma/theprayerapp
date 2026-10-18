@@ -36,7 +36,7 @@ export function People({
   const [flash, setFlash] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const warriors = people.filter((p) => p.role === 'warrior');
+  const warriors = people.filter((p) => p.role === 'warrior' && p.approval === 'approved');
   const active = warriors.filter((p) => p.status === 'active');
   const removed = warriors.filter((p) => p.status === 'removed');
   const list = showRemoved ? removed : active;
@@ -146,7 +146,7 @@ export function People({
   );
 }
 
-function DayPicker({ t, value, onChange, disabled }: { t: Theme; value: number[]; onChange: (days: number[]) => void; disabled?: boolean }) {
+export function DayPicker({ t, value, onChange, disabled }: { t: Theme; value: number[]; onChange: (days: number[]) => void; disabled?: boolean }) {
   return (
     <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
       {DAY_SHORT.map((label, d) => {
@@ -324,6 +324,11 @@ function PersonCard({
           label={removed ? 'Removed' : person.last_sign_in_at ? 'Active' : 'Hasn’t signed in yet'}
         />
       </View>
+      {person.church || person.phone || person.referred_by ? (
+        <Text style={s.small}>
+          {[person.church, person.phone, person.referred_by ? `Referred by ${person.referred_by}` : ''].filter(Boolean).join(' · ')}
+        </Text>
+      ) : null}
       <Text style={s.small}>
         {removed
           ? `Removed ${timeAgo(person.removed_at)} · their prayers stay on the app`

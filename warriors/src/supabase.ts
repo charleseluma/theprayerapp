@@ -6,6 +6,8 @@ const url = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').replace(/\/+$/, '');
 const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
 export const AUDIO_BUCKET = 'prayer-audio';
+/** Web address of this app; email links (confirm, reset password) open here. */
+export const WARRIORS_URL = (process.env.EXPO_PUBLIC_WARRIORS_URL ?? 'https://prayer-uploads-charleseluma.expo.app').replace(/\/+$/, '');
 export const isConfigured = url.startsWith('https://') && anonKey.length > 20;
 const isWeb = Platform.OS === 'web';
 
@@ -59,8 +61,16 @@ export type Profile = {
   full_name: string;
   role: 'admin' | 'warrior';
   status: 'active' | 'removed';
+  approval: 'pending' | 'approved' | 'declined';
+  decline_reason: string;
   assigned_days: number[];
+  phone: string;
+  church: string;
+  referred_by: string;
+  about: string;
 };
+
+export const PROFILE_FIELDS = 'id,email,full_name,role,status,approval,decline_reason,assigned_days,phone,church,referred_by,about';
 
 export type Teammate = { id: string; full_name: string; assigned_days: number[] };
 
@@ -77,6 +87,11 @@ export function friendlyError(message: string | undefined): string {
   if (/duplicate key/i.test(message)) return 'Another prayer was just posted for this day.';
   if (/banned/i.test(message)) return 'Your access has been removed. Contact your administrator.';
   if (/Invalid login credentials/i.test(message)) return 'That email and password don’t match.';
+  if (/Email not confirmed/i.test(message)) return 'Confirm your email first: open the link we emailed you, then sign in.';
+  if (/Signups not allowed|signup.*disabled/i.test(message)) return 'New sign-ups aren’t open yet. Ask an administrator to invite you.';
+  if (/already registered|already been registered/i.test(message)) return 'An account with this email already exists. Sign in, or reset your password.';
+  if (/rate limit|only request this after/i.test(message)) return 'Too many emails were sent. Please wait a few minutes and try again.';
+  if (/Password should be at least/i.test(message)) return 'Use a password with at least 8 characters.';
   if (/Failed to fetch|Network request failed/i.test(message)) return 'No internet connection. Check your connection and try again.';
   if (/exceeded the maximum allowed size|Payload too large/i.test(message)) return 'That audio file is too large. The limit is 50 MB.';
   if (/mime type .* is not supported/i.test(message)) return 'That audio format isn’t supported. Use MP3, M4A, WAV or AAC.';
