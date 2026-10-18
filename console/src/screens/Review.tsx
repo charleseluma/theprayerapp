@@ -178,12 +178,7 @@ function PendingCard({
         </View>
       </View>
       {row.description ? <Text style={s.body}>{row.description}</Text> : null}
-      {createElement('audio', {
-        src: publicAudioUrl(row.audio_path),
-        controls: true,
-        preload: 'none',
-        style: { width: '100%', display: 'block' },
-      })}
+      <AudioPreview s={s} t={t} url={publicAudioUrl(row.audio_path)} />
 
       {asking ? (
         <View style={{ gap: 8 }}>
@@ -235,6 +230,46 @@ function PendingCard({
           <Button s={s} t={t} kind="secondary" label="Ask for changes" onPress={() => setAsking(true)} />
         </View>
       )}
+    </View>
+  );
+}
+
+/** Browser audio player that loads the recording up front and explains any playback problem. */
+function AudioPreview({ s, t, url }: { s: Styles; t: Theme; url: string }) {
+  const [error, setError] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
+  return (
+    <View style={{ gap: 6 }}>
+      {createElement('audio', {
+        key: url,
+        src: url,
+        controls: true,
+        preload: 'metadata',
+        onLoadedMetadata: () => {
+          setReady(true);
+          setError(null);
+        },
+        onError: (e: { currentTarget: HTMLAudioElement }) => {
+          const code = e.currentTarget.error?.code;
+          setError(
+            code === 4
+              ? 'This recording couldn’t be played here. Open it in a new tab, or try Chrome, Edge or Safari.'
+              : code === 2
+                ? 'The recording couldn’t be downloaded. Check your internet connection and reload the page.'
+                : 'This browser couldn’t play the recording. Open it in a new tab to listen.',
+          );
+        },
+        style: { width: '100%', display: 'block' },
+      })}
+      <View style={{ flexDirection: 'row', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+        {error ? <Text style={[s.error, { marginTop: 0, flexShrink: 1 }]}>{error}</Text> : null}
+        {!ready && !error ? <Text style={s.small}>Loading the recording…</Text> : null}
+        {createElement(
+          'a',
+          { href: url, target: '_blank', rel: 'noopener noreferrer', style: { color: t.accent, fontSize: 14, fontWeight: 600, fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif' } },
+          'Open audio in a new tab',
+        )}
+      </View>
     </View>
   );
 }
